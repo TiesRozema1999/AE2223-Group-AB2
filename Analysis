@@ -1,0 +1,375 @@
+# -------------------------------- imports ------------------------------------------
+# import os
+# os.environ["PROJ_LIB"] = "C:\\Users\\sebas\\Anaconda3\\Library\\share"; #fixr
+
+import time
+import datetime
+from math import *
+import matplotlib.pyplot as plt
+from mpl_toolkits.basemap import Basemap
+
+# ----------------------------- data library ----------------------------------------
+data = {}                                       # dictionary for all data with station name as key
+start = time.time()                             # just to know how much time it takes to run all of this
+
+# ------------------------------- functions -----------------------------------------
+
+
+def readfile(filename):
+    """ function to read a file and return it as a list """
+
+    file = open(filename, "r")        # change/add path if neccecary
+    lines = file.readlines()
+    file.close()
+
+    return lines
+
+
+def build_dictionary(filename):
+    """ constructs dictionary given filename """
+
+    file = readfile(filename)
+    date = file[0].split()[3]                                # date (e.g. "12DEC31.")
+    year = date[0:2]
+    year_corrected = "19" + year if (year == "99") else "20" + year
+    date_corrected = year_corrected + date[2:5] + date[5:7]  # formatted to "2012DEC31"
+    parameters = int(file[0].split()[0])                     # number of stations recorded in the file (e.g. 156)
+
+    for i in range(1, parameters+1, 3):
+        lines = file[i].split() + file[i+1].split() + file[i+2].split()
+        lines.insert(0, date_corrected)                       # add date to lines in dictionary
+        station = lines[2]
+
+        for n in range(3):                                    # remove useless strings from data (e.g. "STA" and "+-")
+            lines.remove("STA")
+            lines.remove(station)
+            lines.remove("+-")
+
+        for n in [3, 4, 7, 8, 11, 12]:                        # transform coordinates from scientific notation to float
+            lines[n] = float(lines[n])
+
+        if station in data.keys():
+            data[station] += [lines]
+
+        else:
+            data[station] = [lines]
+    return
+
+
+def sort_files():
+    """ sorts files in chronological order and returns them in a list """
+
+    years = ["99", "00", "01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12", "13", "14"]
+    sorted_files = []
+    for year in years:
+        for day in range(1, 366+1):
+            if len(str(day)) == 1:
+                day = "00" + str(day)
+            elif len(str(day)) == 2:
+                day = "0" + str(day)
+
+            if day == 366 and int(year) % 4 != 0:
+                pass
+
+            else:
+                filename = "PZITRF08" + str(day) + "." + str(year) + "X"
+                sorted_files.append(filename)
+                # print(filename)
+
+    return sorted_files
+
+
+def coordinate_transform():
+    """ converts from cartesian to long,lat,h """
+
+    for station in data:
+        for day in data[station]:
+            x, var_x,  y, var_y, z, var_z = day[3], day[4], day[7], day[8], day[11], day[12]
+
+            # ellipsoidal constants:
+            a = 6378137.0  # [m]
+            b = 6356752.3142  # [m]
+
+            x_min = x - var_x
+            x_max = x + var_x
+
+            y_min = y - var_y
+            y_max = y + var_y
+
+            z_min = z - var_z
+            z_max = z + var_z
+
+            p_min = sqrt(x_min ** 2 + y_min ** 2)
+            p_max = sqrt(x_max ** 2 + y_max ** 2)
+
+            # longitude:
+            condition = 1 if y > 0 else -1
+            delta_min = condition * (pi / 2 - 2 * atan(x_min / (p_min + condition * y_min)))
+            delta_max = condition * (pi / 2 - 2 * atan(x_max / (p_max + condition * y_max)))
+            delta = (delta_max + delta_min) / 2
+            var_delta = (delta_max - delta_min) / 2
+
+            # latitude:
+            phi_min = atan((a ** 2 * z_min) / (b ** 2 * p_min))
+            phi_max = atan((a ** 2 * z_max) / (b ** 2 * p_max))
+            phi = (phi_max + phi_min) / 2
+            var_phi = (phi_max - phi_min) / 2
+
+            # ellipsoid parameters:
+            r_phi_min = sqrt(((a ** 2 * cos(phi_min)) ** 2 + (b ** 2 * sin(phi_min)) ** 2) /
+                             ((a * cos(phi_min)) ** 2 + (b * sin(phi_min)) ** 2))
+            r_phi_max = sqrt(((a ** 2 * cos(phi_max)) ** 2 + (b ** 2 * sin(phi_max)) ** 2) /
+                             ((a * cos(phi_max)) ** 2 + (b * sin(phi_max)) ** 2))
+
+            # determine radius of measured x,y,z coordinates to get height: (measured radius) - (actual radius)
+            r_xyz_min = sqrt(p_min ** 2 + z_min ** 2)
+            r_xyz_max = sqrt(p_max ** 2 + z_max ** 2)
+
+            h_min = r_xyz_min - r_phi_min
+            h_max = r_xyz_max - r_phi_max
+            h = (h_max + h_min) / 2
+            var_h = (h_max - h_min) / 2
+
+            day.append("long."), day.append(degrees(delta)), day.append(degrees(var_delta)),
+            day.append("lat."), day.append(degrees(phi)), day.append(degrees(var_phi)), day.append("h"),
+            day.append(h), day.append(var_h)
+
+    return
+
+
+def run_files():
+        """ sort, read and construct dictionary """
+
+        for file in sort_files():
+            build_dictionary(file)
+        coordinate_transform()
+        return
+
+
+def writefile(station):
+    """ writes a file with all data for a given station """
+
+    file = open(station + ".txt", "w")    # change path
+    for day in data[station]:
+        added = ""
+        for text in day:
+            text = '%.20E' % text if isinstance(text, float) else text
+            added += str(text) + "    "
+        file.write(added)
+        file.write("\n")
+    file.close()
+    return
+
+
+def displacement_rates():
+    """ obtains displacement rates for all stations """
+    for station in data:
+        days = len(data[station])               # number of days recorded for a given station
+        for day in range(1, days):
+            dx = data[station][day][3] - data[station][day - 1][3]
+            dy = data[station][day][7] - data[station][day - 1][7]
+            dz = data[station][day][11] - data[station][day - 1][11]
+            # ds = sqrt(dx**2 + dy**2 + dz**2)
+            # dt = data[station][day + 1][1] - data[station][day][1]
+            data[station][day].append("dx"), data[station][day].append(dx)
+            data[station][day].append("dy"), data[station][day].append(dy)
+            data[station][day].append("dz"), data[station][day].append(dz)
+
+            # Should we average per month? Year?
+            # Why is the longitude displacement in m?
+
+    return
+
+
+def draw_vectormap(lat_min, lat_max, long_min, long_max, start_date, end_date, setting):
+    """ draws a map with displacement vectors for any given start date and end date
+        lat_min, lat_max, long_min, long_max are the map boundaries
+        date format YYYYMMMDD eg. 2001JUN01
+
+        setting: choose from (point, vector or all)
+            vector: plots vectors for stations recorded on given days
+            point: plots stations not recorded on given days
+            all: plots displacement vectors of recorded stations and points for non recorded stations
+
+    """
+
+    station_bound = []                                  # stations in the boundary
+    stations_match = []                                 # stations in the boundary and in time interval
+    stations_unmatch = []                               # stations in boundary but with no date match
+    start_long = []                                     # list of longitudes on start day
+    start_lat = []                                      # list of latitudes on start day
+    end_long = []                                       # list of longitudes on last day
+    end_lat = []                                        # list of latitudes on last day
+
+    for station in data:
+        long = data[station][0][14]  # longitude on first day
+        lat = data[station][0][17]   # latitude on first day
+
+        if (long_max > long > long_min) and (lat_max > lat > lat_min):  # checks if station is in map boundary
+            station_bound.append(station)
+
+            if datetime.datetime.strptime(start_date, '%Y%b%d') > \
+                    datetime.datetime.strptime(data[station][0][0], '%Y%b%d'):
+                condition = 0
+                for day in data[station]:
+
+                    if start_date in day:
+                        long1 = day[14]
+                        lat1 = day[17]
+                        condition = 1
+
+                    if (end_date in day) and (condition == 1):
+                        long2 = day[14]
+                        lat2 = day[17]
+                        condition = 2
+
+                    if condition == 2:           # checks if station is recorded at start and end date
+                        stations_match.append(station)
+                        start_long.append(long1)
+                        start_lat.append(lat1)
+                        end_long.append(long2)
+                        end_lat.append(lat2)
+                        break
+
+    for station in station_bound:               # finds stations that are in map boundary but out of date range
+        if station not in stations_match:
+            stations_unmatch.append(station)
+
+    # print statements for testing
+    print("station entries:" + str(len(station_bound)))
+    print(station_bound)
+    print("station2 entries:" + str(len(stations_match)))
+    print(stations_match)
+    print("stations_unmatch entries:" + str(len(stations_unmatch)))
+    print(stations_unmatch)
+    print("start_long entries:" + str(len(start_long)))
+    print("end_long entries:" + str(len(end_long)))
+
+    m = Basemap(projection="mill", llcrnrlat=lat_min, urcrnrlat=lat_max,
+                llcrnrlon=long_min, urcrnrlon=long_max, resolution="i")
+
+    # m.fillcontinents()
+    # m.drawmapboundary()
+    m.drawcountries(linewidth=0.5, linestyle="solid", color="k")
+    m.drawcoastlines(linewidth=0.5, linestyle="solid", color="k")
+    m.drawparallels(range(lat_min, lat_max, 10), linewidth=0.3, dashes=[8, 6], labels=[1, 0, 0, 0], color='k')
+    m.drawmeridians(range(long_min, long_max, 20), linewidth=0.3, dashes=[8, 6], labels=[0, 0, 0, 1], color='k')
+    m.shadedrelief()
+    # m.bluemarble()
+    # m.etopo()
+
+    scaling = 5000000 * 5                               # scaling factor for plotting of vectors
+
+    if setting == ("vector" or "all"):                  # checks chosen setting
+        for station in range(len(stations_match)):      # plots a vector for each station with date match
+            long1 = start_long[station]
+            lat1 = start_lat[station]
+            long2 = end_long[station]
+            lat2 = end_lat[station]
+
+            long1, lat1 = m(long1, lat1)
+            long2, lat2 = m(long2, lat2)
+            dlong = (long2 - long1) * scaling
+            dlat = (lat2 - lat1) * scaling
+            plt.arrow(long1, lat1, dlong, dlat, color='red', width=15000)
+
+    if setting == ("point" or "all"):
+        for station in stations_unmatch:               # plots a point for each station without date match
+            long, lat = m(data[station][0][14], data[station][0][17])
+            m.plot(long, lat, "ok", markersize=3)      # ok=black ro=red go=green --- alpha is transparency
+            plt.annotate(station, xy=(long, lat))      # FIX THIS!!!!!!!!!!!!!!!!!!!!! ANNOTATION IS FUCKED
+
+    plt.savefig("map.png", dpi=600)
+    plt.show()
+
+    return station_bound, stations_match, start_long, start_lat, end_long, end_lat
+
+
+def graph(position):                                                         #station which needs to be evaluated
+    station = str(position)
+    length_series = len(data[station]) - 1
+    ttab = []                                                               #ttab=time and lattab=lattitude are lists for plotting the graph
+    longtab = []
+    lattab = []
+    htab = []
+    datetab = []
+    e = []                                                                  #e is the error given as standard deviation
+    time = 0
+    long_day1 = data[station][0][14]
+    lat_day1 = data[station][0][17]
+    h_day1 = data[station][0][20]
+
+
+    for i in range(length_series):
+        if i == 0:                                                          #this if\else loop corrects for the first day
+            day = data[station][i]
+            radius = sqrt((day[3] ** 2) + (day[7] ** 2) + (day[11] ** 2))   #calculate radius of the earth at station location
+            longtab.append(np.radians((day[14]  - long_day1)) * radius * 10)     #multiply the change in degree(converted to rad) with radius to compute displacement
+            lattab.append(np.radians((day[17] - lat_day1)) * radius * 10)   # in cm
+            htab.append((day[20] - h_day1)*10)
+            datetab.append(day[0])
+            print((day[20] - h_day1)*10)
+            e.append(day[4]*10)                                                # error for ... in cm
+            time = 0
+            ttab.append(time)
+
+
+# The difference in location is calculated for consecutive days and appended to each respective list
+# This is done to compensate for the fact that some stations might not record every day
+
+        else:
+            day = data[station][i]
+            day2 = data[station][i + 1]
+            radius = sqrt((day[3] ** 2) + (day[7] ** 2) + (day[11] ** 2))
+            longtab.append(np.radians((day[14] - long_day1)) * radius * 10)
+            lattab.append(np.radians((day[17] - lat_day1)) * radius * 10)
+            htab.append((day[20] - h_day1) * 10)
+            datetab.append(day[0])
+            e.append(day[4]*10)
+
+            date = datetime.datetime.strptime(day[0], '%Y%b%d')
+            date_2 = datetime.datetime.strptime(day2[0], '%Y%b%d')
+            diff = date_2 - date
+            diff = diff.days
+            time += diff
+            ttab.append(time)
+
+    # plt.style.use('seaborn-whitegrid')          # plotting style
+    plt.suptitle('Site: ' + station + " Years")
+    plt.subplot(311)
+    plt.errorbar(ttab, longtab, yerr=e, fmt='.', ms=0.5)
+    f = interp1d(ttab, longtab, fill_value="extrapolate", kind='linear')
+    plt.plot(ttab, f(longtab))
+    plt.ylabel('longitude (cm)')
+
+
+    coefs = poly.polyfit(ttab, longtab, 4)
+    ffit = poly.polyval(x_new, coefs)
+    plt.plot(x_new, ffit)
+
+    plt.subplot(312)
+    plt.errorbar(ttab, lattab, yerr=e, fmt='.', ms=0.5)
+    f = interp1d(ttab, lattab, fill_value="extrapolate", kind='linear')
+    plt.plot(ttab, f(lattab))
+    plt.ylabel('latitude (cm)')
+
+    plt.subplot(313)
+    plt.errorbar(ttab, htab, yerr=e, fmt='.', ms=0.5)
+    plt.ylabel('height (cm)')
+
+    plt.savefig(path + station + ".png", dpi=800)
+    plt.clf()
+
+
+    return ttab, longtab, lattab, htab
+
+# -----------------------------testing-----------------------------
+# 82 Stations
+run_files()
+
+# draw_vectormap(-1, 28, 65, 130, "2010JAN01", "2011JAN01", "all")
+# draw_vectormap(-10, 20, 80, 120, "2010JAN01", "2011JAN01", "all")
+draw_vectormap(-10, 20, 90, 130, "1999JAN01", "2014DEC31", "point")
+
+end = time.time()
+print("run time: " + str(end-start) + "s")        # run-time
