@@ -1,2 +1,98 @@
-Hello
-print("Hello world")
+# Imports
+
+import numpy as np
+import datetime
+
+
+# This program calculates the area under a curve by means of a riemann sum
+# Furthermore, we'll try to use this to predict when the next earthquake might occur by means of a treshold area
+
+
+def readfile(filename):
+    """ function to read a file and return it as a list """
+
+    file = open("C:/Users/asus/Desktop/Python stuff/ProjectQ3-4/New data/" + filename + ".txt", "r")        # change path. this is my folder of data that is read.
+    lines = file.readlines()
+    file.close()
+
+    return lines
+
+def correctfile(filename):
+    """ read a file and split it by the spaces """
+
+    file = readfile(filename)
+    datanearly = []
+    for line in file:                                 # split the lines, add them to an array
+        datanearly.append(line.split("    "))
+
+    data = []
+    for line in datanearly:
+        data.append([line[0],line[14],line[17],line[20]])
+
+    return data
+
+def createdata(filename,date1,date2):             # dates (yearMONday)
+    """ Creates an array from file, between the two entered dates """
+
+    dataraw = correctfile(filename)
+    data = []
+
+    if date1 == 0:
+        date1 = dataraw[0][0]
+    if date2 == 0:
+        date2 = dataraw[-1][0]
+
+    cond = False
+
+    for i in dataraw:
+        if str(i[0]) == date1:
+            cond = True
+        if cond:
+            data.append(i)
+        if str(i[0]) == date2:
+            cond = False
+    return data
+
+
+
+def deltafinder(date1,date2):
+    """ Finds the time between two days in days"""
+
+    d1,d2 = datetime.datetime.strptime(date1, '%Y%b%d'), datetime.datetime.strptime(date2, '%Y%b%d')
+
+    return d2-d1
+
+def areacurve(filename,date1,date2,idx,n):                                                        # idx = 1 for x, 2 for y, 3 for z. n is n of points averaged for riemann
+    """ a riemann sum with n number of consecutive points averaged for a height """
+
+    data = createdata(filename,date1,date2)
+    points = []
+
+    for i in data:
+        points.append(float(i[idx]))
+
+
+    sum = 0
+    for i in range(0,(len(data)-(n-1))):
+        sum += np.mean(points[i:(i+(n-1))]) * deltafinder(data[i][0],data[i+(n-1)][0])
+
+    sum -= np.mean([points[0],points[1],points[2]])*deltafinder(date1,date2)
+    return sum
+
+
+#print(areacurve("KTPK","2002JAN01","2002MAR31",1,2))
+
+#def compareArea():
+#    for filename in os.listdir("C:\Users\asus\Desktop\Python stuff\ProjectQ3 - 4\Selected Stations/"):
+#
+#        #outliers = outliercorrection(str(filename))[1]
+#
+#       file = open("C:/Users/asus/Desktop/Python stuff/ProjectQ3-4/Selected Stations/"+str(filename),"w")
+#       for i in outliers:
+#           file.write(str(i[0]) + "\n")
+
+#       file.close()
+#   return
+
+
+print(deltafinder("2000APR30","2002MAY02"))
